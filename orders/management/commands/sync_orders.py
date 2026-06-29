@@ -1,7 +1,6 @@
 from django.core.management.base import BaseCommand
 from orders.models import Order
 
-# 兼容你当前文件位置（关键修复点）
 import sys
 import os
 
@@ -9,7 +8,8 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 if BASE_DIR not in sys.path:
     sys.path.append(BASE_DIR)
 
-from miaoshou_v63 import main as fetch_orders
+# ✅ 这里是唯一修改点
+from miaoshou_v63 import fetch_orders
 
 
 class Command(BaseCommand):
@@ -25,11 +25,8 @@ class Command(BaseCommand):
             print("❌ fetch_orders 执行失败：", e)
             return
 
-        # =========================
-        # ❗ 防 None / 防崩
-        # =========================
         if data is None:
-            print("❌ 返回 None（API失败或解析失败）")
+            print("❌ 返回 None")
             return
 
         if not isinstance(data, list):
@@ -64,4 +61,4 @@ class Command(BaseCommand):
             if created:
                 new_count += 1
 
-        print(f"✅ 同步完成：新增 {new_count} 条 / 跳过 {skip_count} 条")
+        print(f"✅ 同步完成：新增 {new_count} 条 / 跳过 {skip_count}")

@@ -6,8 +6,8 @@ import json
 # =========================
 # 配置区（你只需要改这里）
 # =========================
-APP_KEY = "your_key"
-APP_SECRET = "your_secret"
+APP_KEY = "ak_fc8987879ccc4e2ab57960cde418698f"
+APP_SECRET = "25300a35571e4bb2a3fb094e811a08dc6a48c8fd43704f969e66e8703cf07fc6"
 
 API_URL = "https://xxx.com/api"  # 妙手接口地址
 

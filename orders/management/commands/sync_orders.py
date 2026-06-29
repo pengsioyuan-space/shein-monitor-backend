@@ -1,4 +1,4 @@
-from orders.miaoshou_v63 import fetch_orders
+from miaoshou_v63 import fetch_orders
 from orders.models import Order
 
 

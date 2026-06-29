@@ -1,6 +1,6 @@
 from miaoshou_v63 import fetch_orders
 from orders.models import Order
-
+from django.core.management.base import BaseCommand
 
 class Command(BaseCommand):
     help = "同步订单"

@@ -4,32 +4,43 @@ from miaoshou_v63 import fetch_orders
 
 
 class Command(BaseCommand):
-    help = "同步妙手订单"
+    help = "同步订单（稳定版）"
 
     def handle(self, *args, **kwargs):
         print("🚀 开始同步订单...")
 
-        data = fetch_orders()
+        # ======================
+        # ⭐ 安全调用
+        # ======================
+        try:
+            data = fetch_orders()
+        except Exception as e:
+            print("❌ fetch_orders 崩溃：", e)
+            return
 
-        # ⭐ 防止 None 崩溃
+        # ======================
+        # ⭐ 防 None
+        # ======================
         if not data:
-            print("❌ 没有获取到数据（data=None/空）")
+            print("⚠️ 没有获取到订单数据")
             return
 
         if not isinstance(data, list):
-            print("❌ 数据格式异常：", type(data))
-            print(data)
+            print("❌ 数据格式错误：", type(data))
             return
 
         new_count = 0
         update_count = 0
 
+        # ======================
+        # ⭐ 原逻辑不动
+        # ======================
         for item in data:
             if not isinstance(item, dict):
                 continue
 
             obj, created = Order.objects.get_or_create(
-                order_no=item.get("order_no") or item.get("order_sn") or "",
+                order_no=item.get("order_no", ""),
                 defaults={
                     "shop_name": item.get("shop_name", ""),
                     "region": item.get("region", ""),

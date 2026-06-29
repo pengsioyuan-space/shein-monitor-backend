@@ -1,7 +1,10 @@
-from django.core.management.base import BaseCommand
-from orders.models import Order
-from miaoshou_v63 import main as fetch_orders
+import sys
+import os
 
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+sys.path.append(BASE_DIR)
+
+from miaoshou_v63 import main as fetch_orders
 
 class Command(BaseCommand):
     help = "同步妙手订单"

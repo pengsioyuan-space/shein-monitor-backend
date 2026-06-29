@@ -1,27 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-妙手：按妙手创建时间/下单时间导出包裹物流信息 v6.3（pageSize=100，去掉平台原始状态列）
-
-导出列：
-店铺 | 订单编号 | 订单创建时间 | 已创建小时数 | 妙手包裹号 | 物流单号 | 履约类型
-
-使用接口：
-1) 批量获取包裹列表
-   POST /open/v1/order/package/fetch/search_package_list
-
-本脚本不调用 SHEIN，只调用妙手。
-密钥文件：脚本同目录 miaoshou_key.txt
-内容示例：
-AppKey=ak_xxxxxxxxxxxxxxxxx
-AppSecret=as_xxxxxxxxxxxxxxxxx
-
-注意：
-- 已按用户确认：后台“下单时间”就是接口里的 gmtCreateFrom / gmtCreateTo（妙手创建时间）。
-- 因此本脚本不再放宽候选时间，也不再按 orderInfo.gmtOrderStart 做二次过滤。
-- 妙手接口不允许 gmtCreateTo 晚于当前时间；如果结束时间晚于当前北京时间，脚本会自动截断到当前北京时间。
-- 妙手接口返回的时间按北京时间 UTC+8 解析；已创建小时数使用当前北京时间 UTC+8 计算。
-"""
-
 import os
 import json
 import time
@@ -46,12 +22,16 @@ DOMAIN = "https://openapi-erp.91miaoshou.com"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 KEY_FILE = os.path.join(SCRIPT_DIR, "miaoshou_key.txt")
 
-# 后台页面里的“下单时间”范围。
-# 用户已确认：这个“下单时间”就是妙手创建时间，也就是接口参数 gmtCreateFrom / gmtCreateTo。
-# 注意：截图里是 2026-06-18 23:59:59，不是 17:14:00。
-ORDER_START_FROM = "2026-06-25 00:00:00"
-ORDER_START_TO = "2026-06-27 23:59:59"
+def get_time_range(days=2):
+    now = datetime.now()
+    start = now - timedelta(days=days)
+    end = now
 
+    return (
+        start.strftime("%Y-%m-%d %H:%M:%S"),
+        end.strftime("%Y-%m-%d %H:%M:%S")
+    )
+   
 # 如需手动覆盖接口时间，可填写下面两个值；留空时直接使用 ORDER_START_FROM / ORDER_START_TO。
 # 妙手接口不允许 gmtCreateTo 晚于当前时间，脚本会自动截断到当前北京时间。
 GMT_CREATE_FROM = ""

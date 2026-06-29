@@ -836,29 +836,13 @@ def export_xlsx(rows, filename=OUTPUT_XLSX):
 # 主程序
 # =========================
 
-def main():
-    print("开始导出妙手包裹物流信息 v6.3 - 只走妙手")
-    print("密钥文件：", KEY_FILE)
-    print("接口域名：", DOMAIN)
-    api_create_from, api_create_to = get_api_create_range()
-    print("后台下单时间 = 妙手创建时间：", ORDER_START_FROM, "到", ORDER_START_TO)
-    print("当前北京时间：", get_now_text())
-    print("接口请求范围 gmtCreateFrom/gmtCreateTo：", api_create_from, "到", api_create_to)
-    print("说明：如果结束时间晚于当前北京时间，脚本会自动截断到当前时间，避免接口报错。")
-    print("分页从 page=", PAGE_START, "开始")
-    print("本地 orderInfo.gmtOrderStart 二次过滤 LOCAL_FILTER_BY_ORDER_START=", LOCAL_FILTER_BY_ORDER_START)
-    print("输出字段：", " | ".join(FIELDNAMES))
-
-    app_key, app_secret = read_key_file(KEY_FILE)
-    print("妙手 AppKey：", mask_key(app_key), "len=", len(app_key))
-    print("妙手 AppSecret：", mask_key(app_secret), "len=", len(app_secret))
-
-    packages = fetch_all_packages(app_key, app_secret)
-    rows = build_rows(app_key, app_secret, packages)
-    print("导出行数：", len(rows))
-    export_xlsx(rows)
-    print("完成。")
-
-
-if __name__ == "__main__":
-    main()
+def fetch_orders():
+    return [
+        {
+            "order_no": "...",
+            "shop_name": "...",
+            "region": "...",
+            "created_hours": 12,
+            "logistics_no": "xxx"
+        }
+    ]

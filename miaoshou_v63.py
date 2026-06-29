@@ -1,111 +1,173 @@
-import requests
-import time
+# -*- coding: utf-8 -*-
+
+import os
 import json
+import time
+import hmac
+import hashlib
+import requests
+from datetime import datetime, timedelta, timezone
 
 
 # =========================
-# 配置区（你只需要改这里）
+# 🔥 时间：近2天（你要的）
 # =========================
-APP_KEY = "ak_fc8987879ccc4e2ab57960cde418698f"
-APP_SECRET = "25300a35571e4bb2a3fb094e811a08dc6a48c8fd43704f969e66e8703cf07fc6"
+def get_time_range(days=2):
+    now = datetime.now()
+    start = now - timedelta(days=days)
+    end = now
 
-API_URL = "https://xxx.com/api"  # 妙手接口地址
+    return (
+        start.strftime("%Y-%m-%d %H:%M:%S"),
+        end.strftime("%Y-%m-%d %H:%M:%S")
+    )
 
-ORDER_START_FROM = "2026-06-25 00:00:00"
-ORDER_START_TO = "2026-06-27 23:59:59"
+
+ORDER_START_FROM, ORDER_START_TO = get_time_range(2)
 
 
 # =========================
-# 网络请求层（稳定核心）
+# 配置
 # =========================
-def request_api(url, body, headers=None, retry=3):
-    """
-    稳定版请求：不会卡死 + 自动重试
-    """
+DOMAIN = "https://openapi-erp.91miaoshou.com"
 
-    headers = headers or {
-        "Content-Type": "application/json"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+KEY_FILE = os.path.join(SCRIPT_DIR, "miaoshou_key.txt")
+
+PAGE_SIZE = 100
+PAGE_START = 1
+MAX_PAGES = 1000
+
+
+# =========================
+# 读取 key
+# =========================
+def read_keys():
+    data = {}
+    with open(KEY_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            if "=" in line:
+                k, v = line.strip().split("=", 1)
+                data[k.lower()] = v.strip()
+
+    return data["appkey"], data["appsecret"]
+
+
+# =========================
+# sign
+# =========================
+def sign(app_key, app_secret, path, ts, body):
+    raw = f"{app_secret}{path}{ts}{app_key}{body}{app_secret}"
+    return hmac.new(app_secret.encode(), raw.encode(), hashlib.sha256).hexdigest()
+
+
+# =========================
+# API 请求（已防崩）
+# =========================
+def request_api(app_key, app_secret, path, body):
+    url = DOMAIN + path
+    body_json = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
+    ts = str(int(time.time()))
+
+    headers = {
+        "x-app-key": app_key,
+        "x-timestamp": ts,
+        "x-sign": sign(app_key, app_secret, path, ts, body_json),
+        "Content-Type": "application/json",
     }
 
-    for i in range(retry):
+    try:
+        r = requests.post(url, data=body_json.encode(), headers=headers, timeout=30)
+
+        print("状态码:", r.status_code)
+        print("返回前200:", r.text[:200])
+
+        # ❗ 防空
+        if not r.text or len(r.text.strip()) < 2:
+            return None
+
+        # ❗ 防 JSON 崩
         try:
-            print(f"📡 请求第 {i+1} 次: {url}")
+            return r.json()
+        except:
+            print("❌ JSON解析失败")
+            return None
 
-            resp = requests.post(
-                url,
-                data=json.dumps(body),
-                headers=headers,
-                timeout=(5, 20)  # 连接5秒 + 响应20秒
-            )
-
-            print("✅ 状态码:", resp.status_code)
-
-            if resp.status_code != 200:
-                print("⚠️ 非200:", resp.text[:200])
-                continue
-
-            data = resp.json()
-
-            if not data:
-                print("⚠️ 空响应")
-                continue
-
-            return data
-
-        except requests.exceptions.Timeout:
-            print("⏰ 超时")
-        except Exception as e:
-            print("❌ 请求错误:", str(e))
-
-        time.sleep(2)
-
-    print("❌ 重试失败，返回空")
-    return None
+    except Exception as e:
+        print("❌ 请求失败:", e)
+        return None
 
 
 # =========================
-# 获取包裹（核心）
+# 拉包裹列表
 # =========================
 def fetch_packages():
-    body = {
-        "appKey": APP_KEY,
-        "appSecret": APP_SECRET,
-        "startTime": ORDER_START_FROM,
-        "endTime": ORDER_START_TO
-    }
+    app_key, app_secret = read_keys()
+    all_data = []
 
-    data = request_api(API_URL, body)
+    for page in range(PAGE_START, PAGE_START + MAX_PAGES):
 
-    if not data:
+        body = {
+            "page": page,
+            "pageSize": PAGE_SIZE,
+            "gmtCreateFrom": ORDER_START_FROM,
+            "gmtCreateTo": ORDER_START_TO,
+        }
+
+        res = request_api(app_key, app_secret,
+                           "/open/v1/order/package/fetch/search_package_list",
+                           body)
+
+        if not res:
+            break
+
+        data = res.get("data", {})
+        lst = data.get("list") or data.get("orderPackageList") or []
+
+        if not lst:
+            break
+
+        all_data.extend(lst)
+
+        if len(lst) < PAGE_SIZE:
+            break
+
+        time.sleep(0.1)
+
+    return all_data
+
+
+# =========================
+# 转业务数据
+# =========================
+def fetch_orders():
+    try:
+        packages = fetch_packages()
+
+        if not packages:
+            return []
+
+        result = []
+
+        for p in packages:
+            result.append({
+                "order_no": p.get("order_no") or p.get("orderSn") or "",
+                "shop_name": p.get("shop_name", ""),
+                "region": p.get("region", ""),
+                "created_hours": p.get("created_hours", 0),
+                "logistics_no": p.get("logistics_no", ""),
+            })
+
+        return result
+
+    except Exception as e:
+        print("❌ fetch_orders错误:", e)
         return []
 
-    return data.get("data", []) or []
-
 
 # =========================
-# 主入口
+# CLI测试
 # =========================
-def main():
-    print("🚀 开始抓取订单...")
-
-    packages = fetch_packages()
-
-    print("📦 拉取数量:", len(packages))
-
-    results = []
-
-    for p in packages:
-        try:
-            results.append({
-                "order_no": p.get("order_no"),
-                "shop_name": p.get("shop_name"),
-                "region": p.get("region"),
-                "created_hours": p.get("created_hours"),
-                "logistics_no": p.get("logistics_no")
-            })
-        except Exception as e:
-            print("⚠️ 跳过异常数据:", e)
-
-    print("✅ 处理完成:", len(results))
-
-    return results
+if __name__ == "__main__":
+    data = fetch_orders()
+    print("总数:", len(data))

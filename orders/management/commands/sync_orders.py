@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 from orders.models import Order
-from orders.miaoshou_v63 import main as fetch_orders
+from miaoshou_v63 import main as fetch_orders
 
 
 class Command(BaseCommand):

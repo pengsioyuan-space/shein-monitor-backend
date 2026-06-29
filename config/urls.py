@@ -1,9 +1,5 @@
-
-from django.urls import path
-from dashboard.views import dashboard
-from orders.views import export_ops_orders
+from django.urls import path, include
 
 urlpatterns = [
-    path('', dashboard),
-    path('export/', export_ops_orders),
+    path("orders/", include("orders.urls")),
 ]

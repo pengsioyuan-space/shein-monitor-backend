@@ -1,27 +1,13 @@
+from datetime import datetime, timezone, timedelta
 import os
 import json
 import time
 import hmac
 import hashlib
 import requests
-from datetime import datetime, timezone, timedelta
 
-def get_time_range(days=2):
-    now = datetime.now()
-    start = now - timedelta(days=days)
-    end = now
 
-    return (
-        start.strftime("%Y-%m-%d %H:%M:%S"),
-        end.strftime("%Y-%m-%d %H:%M:%S")
-    )
-    
-try:
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from openpyxl.utils import get_column_letter
-except ImportError:
-    raise ImportError("未安装 openpyxl，请先运行：pip install openpyxl")
+
 
 
 # =========================
@@ -32,7 +18,20 @@ DOMAIN = "https://openapi-erp.91miaoshou.com"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 KEY_FILE = os.path.join(SCRIPT_DIR, "miaoshou_key.txt")
 
+#获取查询的时间
+def get_time_range(days=2):
+    now = datetime.now()
+    start = now - timedelta(days=days)
+    end = now
+
+    return (
+        start.strftime("%Y-%m-%d %H:%M:%S"),
+        end.strftime("%Y-%m-%d %H:%M:%S")
+    )
+
+
 ORDER_START_FROM, ORDER_START_TO = get_time_range(2)
+
 # 如需手动覆盖接口时间，可填写下面两个值；留空时直接使用 ORDER_START_FROM / ORDER_START_TO。
 # 妙手接口不允许 gmtCreateTo 晚于当前时间，脚本会自动截断到当前北京时间。
 GMT_CREATE_FROM = ""
@@ -73,7 +72,7 @@ ONLINE_PRODUCT_SLEEP_SECONDS = 0.08
 PACKAGE_LIST_PATH = "/open/v1/order/package/fetch/search_package_list"
 ONLINE_PRODUCT_PATH = "/open/v1/order/logistics_agent/manage/get_enable_online_product_list"
 
-OUTPUT_XLSX = f"妙手包裹物流信息v6.3-下单时间-{ORDER_START_FROM[:10].replace('-', '.')}-{ORDER_START_TO[:10].replace('-', '.')}.xlsx"
+OUTPUT_XLSX = None
 
 FIELDNAMES = [
     "店铺",
@@ -818,6 +817,8 @@ def export_xlsx(rows, filename=OUTPUT_XLSX):
 # =========================
 
 def main():
+    global OUTPUT_XLSX
+    OUTPUT_XLSX = f"妙手包裹物流信息v6.3-下单时间-{ORDER_START_FROM[:10].replace('-', '.')}-{ORDER_START_TO[:10].replace('-', '.')}.xlsx"
     print("开始导出妙手包裹物流信息 v6.3 - 只走妙手")
     print("密钥文件：", KEY_FILE)
     print("接口域名：", DOMAIN)

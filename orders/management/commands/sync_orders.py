@@ -1,36 +1,29 @@
-import sys
-import os
-
-from django.core.management.base import BaseCommand
+from orders.miaoshou_v63 import fetch_orders
 from orders.models import Order
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-sys.path.append(BASE_DIR)
-
-from miaoshou_v63 import main as fetch_orders
 
 class Command(BaseCommand):
-    help = "同步妙手订单"
+    help = "同步订单"
 
     def handle(self, *args, **kwargs):
-        print("🚀 开始同步订单")
+        data = fetch_orders()
 
-        data = fetch_orders()  # ⚠️ 这里要改成“返回数据版本”
+        print("开始同步订单...")
 
         new_count = 0
 
         for item in data:
             obj, created = Order.objects.get_or_create(
-                order_no=item["order_no"],
+                order_no=item["订单编号"],
                 defaults={
-                    "shop_name": item.get("shop_name", ""),
-                    "region": item.get("region", ""),
-                    "created_hours": item.get("created_hours", 0),
-                    "logistics_no": item.get("logistics_no", ""),
+                    "shop_name": item["店铺"],
+                    "region": "",   # 你后面可以补
+                    "created_hours": item["已创建小时数"],
+                    "logistics_no": item["物流单号"],
                 }
             )
 
             if created:
                 new_count += 1
 
-        print(f"✅ 同步完成：新增 {new_count} 条")
+        print(f"同步完成：新增 {new_count} 条")

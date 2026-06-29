@@ -1,6 +1,9 @@
 import sys
 import os
 
+from django.core.management.base import BaseCommand
+from orders.models import Order
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 sys.path.append(BASE_DIR)
 

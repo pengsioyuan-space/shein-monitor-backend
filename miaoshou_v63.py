@@ -6,6 +6,16 @@ import hashlib
 import requests
 from datetime import datetime, timezone, timedelta
 
+def get_time_range(days=2):
+    now = datetime.now()
+    start = now - timedelta(days=days)
+    end = now
+
+    return (
+        start.strftime("%Y-%m-%d %H:%M:%S"),
+        end.strftime("%Y-%m-%d %H:%M:%S")
+    )
+    
 try:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -22,16 +32,7 @@ DOMAIN = "https://openapi-erp.91miaoshou.com"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 KEY_FILE = os.path.join(SCRIPT_DIR, "miaoshou_key.txt")
 
-def get_time_range(days=2):
-    now = datetime.now()
-    start = now - timedelta(days=days)
-    end = now
-
-    return (
-        start.strftime("%Y-%m-%d %H:%M:%S"),
-        end.strftime("%Y-%m-%d %H:%M:%S")
-    )
-   
+ORDER_START_FROM, ORDER_START_TO = get_time_range(2)
 # 如需手动覆盖接口时间，可填写下面两个值；留空时直接使用 ORDER_START_FROM / ORDER_START_TO。
 # 妙手接口不允许 gmtCreateTo 晚于当前时间，脚本会自动截断到当前北京时间。
 GMT_CREATE_FROM = ""

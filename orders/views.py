@@ -52,38 +52,43 @@ def dashboard(request):
 # =========================
 # ② 订单列表接口（表格）
 # =========================
-def orders_list(request):
+def order_list(request):
+    if request.method == "OPTIONS":
+        return add_cors(HttpResponse(""))
 
-    qs = Order.objects.all()
+    qs = base_queryset(request)
 
-    # 时间过滤（兼容你前端 start/end）
-    start = request.GET.get("start")
-    end = request.GET.get("end")
+    # 默认显示最新更新的订单
+    if has_model_field("updated_at"):
+        qs = qs.order_by("-updated_at", "-id")
+    elif has_model_field("created_at"):
+        qs = qs.order_by("-created_at", "-id")
+    elif has_model_field("created_hours"):
+        qs = qs.order_by("created_hours")
+    else:
+        qs = qs.order_by("-id")
 
-    if start:
-        qs = qs.filter(created_at__gte=parse_datetime(start))
+    limit = request.GET.get("limit", "100")
+    try:
+        limit = int(limit)
+    except Exception:
+        limit = 100
 
-    if end:
-        qs = qs.filter(created_at__lte=parse_datetime(end))
+    limit = max(1, min(limit, 500))
 
-    limit = int(request.GET.get("limit", 100))
-    qs = qs.order_by("-created_at")[:limit]
+    data = []
 
-    data = [
-        {
-            "order_no": o.order_no,
-            "shop_name": o.shop_name,
-            "region": o.region,
-            "created_hours": o.created_hours,
-            "logistics_no": o.logistics_no,
-        }
-        for o in qs
-    ]
+    for o in qs[:limit]:
+        data.append({
+            "order_no": getattr(o, "order_no", ""),
+            "shop_name": getattr(o, "shop_name", ""),
+            "region": getattr(o, "region", ""),
+            "created_hours": getattr(o, "created_hours", ""),
+            "logistics_no": getattr(o, "logistics_no", ""),
+            "updated_at": str(getattr(o, "updated_at", "")),
+        })
 
-    return JsonResponse({
-        "data": data
-    })
-
+    return add_cors(JsonResponse({"data": data}, json_dumps_params={"ensure_ascii": False}))
 
 # =========================
 # ③ 导出接口（下载按钮）

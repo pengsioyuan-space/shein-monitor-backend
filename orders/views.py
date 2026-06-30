@@ -1,191 +1,238 @@
+import csv
+from datetime import datetime
 from django.http import JsonResponse, HttpResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.db.models import Count
+from django.db.models import Q
 from orders.models import Order
 
-try:
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from openpyxl.utils import get_column_letter
-except Exception:
-    Workbook = None
+
+def has_model_field(name):
+    return any(field.name == name for field in Order._meta.fields)
 
 
-def cors_json(data, status=200):
-    response = JsonResponse(data, status=status, json_dumps_params={"ensure_ascii": False})
+def add_cors(response):
     response["Access-Control-Allow-Origin"] = "*"
     response["Access-Control-Allow-Methods"] = "GET, OPTIONS"
     response["Access-Control-Allow-Headers"] = "Content-Type"
     return response
 
 
-def cors_response(response):
-    response["Access-Control-Allow-Origin"] = "*"
-    response["Access-Control-Allow-Methods"] = "GET, OPTIONS"
-    response["Access-Control-Allow-Headers"] = "Content-Type"
-    return response
+def parse_time(text):
+    if not text:
+        return None
+
+    text = str(text).strip()
+
+    formats = [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y/%m/%d %H:%M",
+        "%Y/%m/%d %H:%M:%S",
+    ]
+
+    for fmt in formats:
+        try:
+            return datetime.strptime(text, fmt)
+        except Exception:
+            pass
+
+    return None
 
 
-def safe_float(value):
-    try:
-        if value in [None, ""]:
-            return 0
-        return float(value)
-    except Exception:
-        return 0
-
-
-def order_to_dict(order):
-    return {
-        "order_no": getattr(order, "order_no", "") or "",
-        "shop_name": getattr(order, "shop_name", "") or "",
-        "region": getattr(order, "region", "") or "OTHER",
-        "created_hours": safe_float(getattr(order, "created_hours", 0)),
-        "logistics_no": getattr(order, "logistics_no", "") or "",
-    }
-
-
-@csrf_exempt
-def dashboard(request):
-    if request.method == "OPTIONS":
-        return cors_json({})
-
+def base_queryset(request):
     qs = Order.objects.all()
 
+    start = request.GET.get("start")
+    end = request.GET.get("end")
+
+    start_dt = parse_time(start)
+    end_dt = parse_time(end)
+
+    if has_model_field("created_time"):
+        field_name = "created_time"
+    elif has_model_field("order_created_time"):
+        field_name = "order_created_time"
+    else:
+        field_name = None
+
+    if field_name and start_dt:
+        qs = qs.filter(**{f"{field_name}__gte": start_dt})
+
+    if field_name and end_dt:
+        qs = qs.filter(**{f"{field_name}__lte": end_dt})
+
+    return qs
+
+
+def get_region_count(qs, region):
+    if not has_model_field("region"):
+        return 0
+    return qs.filter(region=region).count()
+
+
+def not_collected_filter():
+    """
+    现在先兼容数据库。
+    如果以后你加 first_collected_time / is_collected 字段，这里会自动启用。
+    """
+    if has_model_field("first_collected_time"):
+        return Q(first_collected_time__isnull=True) | Q(first_collected_time="")
+    if has_model_field("is_collected"):
+        return Q(is_collected=False)
+    return Q()
+
+
+def dashboard(request):
+    if request.method == "OPTIONS":
+        return add_cors(HttpResponse(""))
+
+    qs = base_queryset(request)
+
     total = qs.count()
-    eu = qs.filter(region="EU").count()
-    us = qs.filter(region="US").count()
-    ca = qs.filter(region="CA").count()
+    eu = get_region_count(qs, "EU")
+    us = get_region_count(qs, "US")
+    ca = get_region_count(qs, "CA")
 
-    t12 = sum(1 for o in qs.only("created_hours") if safe_float(getattr(o, "created_hours", 0)) >= 12)
-    t24 = sum(1 for o in qs.only("created_hours") if safe_float(getattr(o, "created_hours", 0)) >= 24)
-    t36 = sum(1 for o in qs.only("created_hours") if safe_float(getattr(o, "created_hours", 0)) >= 36)
-    t48 = sum(1 for o in qs.only("created_hours") if safe_float(getattr(o, "created_hours", 0)) >= 48)
+    if has_model_field("region"):
+        other = qs.exclude(region__in=["EU", "US", "CA"]).count()
+    else:
+        other = 0
 
-    return cors_json({
+    if has_model_field("created_hours"):
+        pending_process_risk = qs.filter(
+            Q(logistics_no__isnull=True) | Q(logistics_no=""),
+            created_hours__gte=12,
+        ).count()
+
+        pending_ship_risk = qs.filter(
+            logistics_no__isnull=False,
+            created_hours__gte=24,
+        ).exclude(logistics_no="").count()
+
+        pickup_appointment_risk = qs.filter(
+            logistics_no__isnull=False,
+            created_hours__gte=36,
+        ).exclude(logistics_no="").filter(
+            not_collected_filter()
+        ).count()
+
+        pickup_risk = qs.filter(
+            logistics_no__isnull=False,
+            created_hours__gte=48,
+        ).exclude(logistics_no="").filter(
+            not_collected_filter()
+        ).count()
+    else:
+        pending_process_risk = 0
+        pending_ship_risk = 0
+        pickup_appointment_risk = 0
+        pickup_risk = 0
+
+    data = {
         "total": total,
         "eu": eu,
         "us": us,
         "ca": ca,
-        "other": max(total - eu - us - ca, 0),
-        "t12": t12,
-        "t24": t24,
-        "t36": t36,
-        "t48": t48,
-    })
+        "other": other,
 
+        "pending_process_risk": pending_process_risk,
+        "pending_ship_risk": pending_ship_risk,
+        "pickup_appointment_risk": pickup_appointment_risk,
+        "pickup_risk": pickup_risk,
 
-@csrf_exempt
-def trend(request):
-    if request.method == "OPTIONS":
-        return cors_json({})
+        "region_chart": {
+            "EU": eu,
+            "US": us,
+            "CA": ca,
+            "OTHER": other,
+        },
 
-    qs = Order.objects.all()
-    total = qs.count()
-    buckets = {
-        "12h+": 0,
-        "24h+": 0,
-        "36h+": 0,
-        "48h+": 0,
+        "risk_chart": {
+            "即将处理超时": pending_process_risk,
+            "即将发货超时": pending_ship_risk,
+            "即将预约取件超时": pickup_appointment_risk,
+            "即将揽收超时": pickup_risk,
+        },
     }
 
-    for order in qs.only("created_hours"):
-        h = safe_float(getattr(order, "created_hours", 0))
-        if h >= 12:
-            buckets["12h+"] += 1
-        if h >= 24:
-            buckets["24h+"] += 1
-        if h >= 36:
-            buckets["36h+"] += 1
-        if h >= 48:
-            buckets["48h+"] += 1
-
-    region_counts = {"EU": 0, "US": 0, "CA": 0, "OTHER": 0}
-    for row in qs.values("region").annotate(count=Count("id")):
-        region = row.get("region") or "OTHER"
-        if region not in region_counts:
-            region = "OTHER"
-        region_counts[region] += row.get("count", 0)
-
-    return cors_json({
-        "total": total,
-        "risk": buckets,
-        "region": region_counts,
-    })
+    return add_cors(JsonResponse(data, json_dumps_params={"ensure_ascii": False}))
 
 
-@csrf_exempt
 def order_list(request):
     if request.method == "OPTIONS":
-        return cors_json({})
+        return add_cors(HttpResponse(""))
 
+    qs = base_queryset(request)
+
+    if has_model_field("created_hours"):
+        qs = qs.order_by("-created_hours")
+    else:
+        qs = qs.order_by("order_no")
+
+    limit = request.GET.get("limit", "100")
     try:
-        limit = int(request.GET.get("limit", 500))
+        limit = int(limit)
     except Exception:
-        limit = 500
-    limit = max(1, min(limit, 2000))
+        limit = 100
 
-    qs = Order.objects.all().order_by("-created_hours")[:limit]
-    data = [order_to_dict(o) for o in qs]
+    limit = max(1, min(limit, 500))
 
-    return cors_json({
-        "count": Order.objects.count(),
-        "data": data,
-    })
+    data = []
+
+    for o in qs[:limit]:
+        data.append({
+            "order_no": getattr(o, "order_no", ""),
+            "shop_name": getattr(o, "shop_name", ""),
+            "region": getattr(o, "region", ""),
+            "created_hours": getattr(o, "created_hours", ""),
+            "logistics_no": getattr(o, "logistics_no", ""),
+        })
+
+    return add_cors(JsonResponse({"data": data}, json_dumps_params={"ensure_ascii": False}))
 
 
-@csrf_exempt
-def export_ops_orders(request):
+def trend(request):
     if request.method == "OPTIONS":
-        return cors_json({})
+        return add_cors(HttpResponse(""))
 
-    if Workbook is None:
-        return cors_json({"error": "openpyxl 未安装，请安装 openpyxl"}, status=500)
+    qs = base_queryset(request)
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "运营订单"
+    if has_model_field("created_hours"):
+        risk_12 = qs.filter(created_hours__gte=12).count()
+        risk_24 = qs.filter(created_hours__gte=24).count()
+        risk_36 = qs.filter(created_hours__gte=36).count()
+        risk_48 = qs.filter(created_hours__gte=48).count()
+    else:
+        risk_12 = risk_24 = risk_36 = risk_48 = 0
 
-    headers = ["订单号", "店铺", "区域", "已创建小时数", "物流单号"]
-    fill = PatternFill("solid", fgColor="D9F3EE")
-    thin = Side(style="thin", color="B7B7B7")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    data = {
+        "labels": ["12h+", "24h+", "36h+", "48h+"],
+        "values": [risk_12, risk_24, risk_36, risk_48],
+    }
 
-    for col, title in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col, value=title)
-        cell.font = Font(bold=True)
-        cell.fill = fill
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.border = border
+    return add_cors(JsonResponse(data, json_dumps_params={"ensure_ascii": False}))
 
-    for row_index, order in enumerate(Order.objects.all().order_by("-created_hours"), 2):
-        row = order_to_dict(order)
-        values = [
-            row["order_no"],
-            row["shop_name"],
-            row["region"],
-            row["created_hours"],
-            row["logistics_no"],
-        ]
-        for col, value in enumerate(values, 1):
-            cell = ws.cell(row=row_index, column=col, value=value)
-            cell.alignment = Alignment(vertical="center")
-            cell.border = border
-            if col == 4:
-                cell.number_format = "0.00"
-            else:
-                cell.number_format = "@"
 
-    widths = [28, 28, 12, 16, 32]
-    for col, width in enumerate(widths, 1):
-        ws.column_dimensions[get_column_letter(col)].width = width
+def export_ops_orders(request):
+    qs = base_queryset(request)
 
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{max(ws.max_row, 1)}"
+    if has_model_field("created_hours"):
+        qs = qs.order_by("-created_hours")
 
-    response = HttpResponse(
-        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-    response["Content-Disposition"] = 'attachment; filename="ops_orders.xlsx"'
-    wb.save(response)
-    return cors_response(response)
+    response = HttpResponse(content_type="text/csv; charset=utf-8-sig")
+    response["Content-Disposition"] = 'attachment; filename="ops_orders.csv"'
+    response.write("\ufeff")
+
+    writer = csv.writer(response)
+    writer.writerow(["订单号", "店铺", "区域", "已创建小时数", "物流号"])
+
+    for o in qs:
+        writer.writerow([
+            getattr(o, "order_no", ""),
+            getattr(o, "shop_name", ""),
+            getattr(o, "region", ""),
+            getattr(o, "created_hours", ""),
+            getattr(o, "logistics_no", ""),
+        ])
+
+    return add_cors(response)

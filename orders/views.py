@@ -83,79 +83,13 @@ def not_collected_filter():
 
 
 def dashboard(request):
-    if request.method == "OPTIONS":
-        return add_cors(HttpResponse(""))
 
-    qs = base_queryset(request)
+    stat = DashboardStats.objects.order_by("-updated_at").first()
 
-    total = qs.count()
-    eu = get_region_count(qs, "EU")
-    us = get_region_count(qs, "US")
-    ca = get_region_count(qs, "CA")
+    if not stat:
+        return JsonResponse({"error": "no data"})
 
-    if has_model_field("region"):
-        other = qs.exclude(region__in=["EU", "US", "CA"]).count()
-    else:
-        other = 0
-
-    if has_model_field("created_hours"):
-        pending_process_risk = qs.filter(
-            Q(logistics_no__isnull=True) | Q(logistics_no=""),
-            created_hours__gte=12,
-        ).count()
-
-        pending_ship_risk = qs.filter(
-            logistics_no__isnull=False,
-            created_hours__gte=24,
-        ).exclude(logistics_no="").count()
-
-        pickup_appointment_risk = qs.filter(
-            logistics_no__isnull=False,
-            created_hours__gte=36,
-        ).exclude(logistics_no="").filter(
-            not_collected_filter()
-        ).count()
-
-        pickup_risk = qs.filter(
-            logistics_no__isnull=False,
-            created_hours__gte=48,
-        ).exclude(logistics_no="").filter(
-            not_collected_filter()
-        ).count()
-    else:
-        pending_process_risk = 0
-        pending_ship_risk = 0
-        pickup_appointment_risk = 0
-        pickup_risk = 0
-
-    data = {
-        "total": total,
-        "eu": eu,
-        "us": us,
-        "ca": ca,
-        "other": other,
-
-        "pending_process_risk": pending_process_risk,
-        "pending_ship_risk": pending_ship_risk,
-        "pickup_appointment_risk": pickup_appointment_risk,
-        "pickup_risk": pickup_risk,
-
-        "region_chart": {
-            "EU": eu,
-            "US": us,
-            "CA": ca,
-            "OTHER": other,
-        },
-
-        "risk_chart": {
-            "即将处理超时": pending_process_risk,
-            "即将发货超时": pending_ship_risk,
-            "即将预约取件超时": pickup_appointment_risk,
-            "即将揽收超时": pickup_risk,
-        },
-    }
-
-    return add_cors(JsonResponse(data, json_dumps_params={"ensure_ascii": False}))
+    return JsonResponse(stat.data)
 
 
 def order_list(request):

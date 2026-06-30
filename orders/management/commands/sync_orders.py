@@ -1,5 +1,8 @@
 from django.core.management.base import BaseCommand
 from orders.models import Order
+from orders.models import DashboardStats
+from django.utils import timezone
+
 import importlib
 
 
@@ -168,3 +171,18 @@ class Command(BaseCommand):
         print(
             f"✅ 同步完成：新增 {created_count} 条 / 更新 {updated_count} 条 / 跳过 {skipped_count} 条"
         )
+def update_dashboard_stats():
+    orders = Order.objects.all()
+
+    data = {
+        "total": orders.count(),
+        "eu": orders.filter(region="EU").count(),
+        "us": orders.filter(region="US").count(),
+        "ca": orders.filter(region="CA").count(),
+        "other": orders.exclude(region__in=["EU","US","CA"]).count(),
+    }
+
+    DashboardStats.objects.create(
+        data=data,
+        updated_at=timezone.now()
+    )

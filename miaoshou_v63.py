@@ -808,6 +808,36 @@ def export_xlsx(rows, filename=OUTPUT_XLSX):
     print("已生成 Excel：", filename)
 
 
+
+# =========================
+# Django 同步入口
+# =========================
+
+def fetch_orders():
+    """
+    给 Django management command 使用：
+    保持原 v6.3 逻辑，只是不导出 Excel，直接返回 build_rows 生成的 rows。
+    返回字段保持原中文列名：
+    店铺 / 订单编号 / 订单创建时间 / 已创建小时数 / 妙手包裹号 / 物流单号 / 履约类型
+    """
+    print("开始抓取妙手包裹物流信息 v6.3 - Django sync 模式")
+    print("密钥文件：", KEY_FILE)
+    print("接口域名：", DOMAIN)
+
+    api_create_from, api_create_to = get_api_create_range()
+    print("后台下单时间 = 妙手创建时间：", ORDER_START_FROM, "到", ORDER_START_TO)
+    print("当前北京时间：", get_now_text())
+    print("接口请求范围 gmtCreateFrom/gmtCreateTo：", api_create_from, "到", api_create_to)
+
+    app_key, app_secret = read_key_file(KEY_FILE)
+    print("妙手 AppKey：", mask_key(app_key), "len=", len(app_key))
+    print("妙手 AppSecret：", mask_key(app_secret), "len=", len(app_secret))
+
+    packages = fetch_all_packages(app_key, app_secret)
+    rows = build_rows(app_key, app_secret, packages)
+    print("同步返回行数：", len(rows))
+    return rows
+
 # =========================
 # 主程序
 # =========================

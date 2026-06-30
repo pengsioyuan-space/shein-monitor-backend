@@ -1,16 +1,17 @@
+# orders/models.py
 
-from django.db import models
+class DashboardStats(models.Model):
+    updated_at = models.DateTimeField(auto_now=True)
 
-class Order(models.Model):
-    order_no = models.CharField(max_length=100, unique=True)
-    shop_name = models.CharField(max_length=100)
-    region = models.CharField(max_length=10, default='OTHER')
-    create_time = models.DateTimeField(null=True)
-    created_hours = models.FloatField(default=0)
-    logistics_no = models.CharField(max_length=100, blank=True, null=True)
-    fulfillment_type = models.CharField(max_length=50, blank=True, null=True)
+    total = models.IntegerField(default=0)
+    eu = models.IntegerField(default=0)
+    us = models.IntegerField(default=0)
+    ca = models.IntegerField(default=0)
+    other = models.IntegerField(default=0)
 
+    pending_process_risk = models.IntegerField(default=0)
+    pending_ship_risk = models.IntegerField(default=0)
+    pickup_appointment_risk = models.IntegerField(default=0)
+    pickup_risk = models.IntegerField(default=0)
 
-class OrderRisk(models.Model):
-    order = models.OneToOneField(Order, on_delete=models.CASCADE)
-    is_delay_risk = models.BooleanField(default=False)
+    data = models.JSONField(default=dict)

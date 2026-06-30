@@ -1,10 +1,42 @@
-from datetime import datetime, timezone, timedelta
+# -*- coding: utf-8 -*-
+"""
+妙手：按妙手创建时间/下单时间导出包裹物流信息 v6.3（pageSize=100，去掉平台原始状态列）
+
+导出列：
+店铺 | 订单编号 | 订单创建时间 | 已创建小时数 | 妙手包裹号 | 物流单号 | 履约类型
+
+使用接口：
+1) 批量获取包裹列表
+   POST /open/v1/order/package/fetch/search_package_list
+
+本脚本不调用 SHEIN，只调用妙手。
+密钥文件：脚本同目录 miaoshou_key.txt
+内容示例：
+AppKey=ak_xxxxxxxxxxxxxxxxx
+AppSecret=as_xxxxxxxxxxxxxxxxx
+
+注意：
+- 已按用户确认：后台“下单时间”就是接口里的 gmtCreateFrom / gmtCreateTo（妙手创建时间）。
+- 因此本脚本不再放宽候选时间，也不再按 orderInfo.gmtOrderStart 做二次过滤。
+- 妙手接口不允许 gmtCreateTo 晚于当前时间；如果结束时间晚于当前北京时间，脚本会自动截断到当前北京时间。
+- 妙手接口返回的时间按北京时间 UTC+8 解析；已创建小时数使用当前北京时间 UTC+8 计算。
+"""
+
 import os
 import json
 import time
 import hmac
 import hashlib
 import requests
+from datetime import datetime, timezone, timedelta
+
+try:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+except ImportError:
+    raise ImportError("未安装 openpyxl，请先运行：pip install openpyxl")
+
 
 # =========================
 # 配置区
@@ -14,17 +46,16 @@ DOMAIN = "https://openapi-erp.91miaoshou.com"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 KEY_FILE = os.path.join(SCRIPT_DIR, "miaoshou_key.txt")
 
-#获取查询的时间
+# 后台页面里的“下单时间”范围。
+# 用户已确认：这个“下单时间”就是妙手创建时间，也就是接口参数 gmtCreateFrom / gmtCreateTo。
+# 最小改动：动态取“当前北京时间近 2 天”。
 def get_time_range(days=2):
-    now = datetime.now()
+    now = datetime.now(timezone(timedelta(hours=8)))
     start = now - timedelta(days=days)
-    end = now
-
     return (
         start.strftime("%Y-%m-%d %H:%M:%S"),
-        end.strftime("%Y-%m-%d %H:%M:%S")
+        now.strftime("%Y-%m-%d %H:%M:%S"),
     )
-
 
 ORDER_START_FROM, ORDER_START_TO = get_time_range(2)
 
@@ -68,7 +99,7 @@ ONLINE_PRODUCT_SLEEP_SECONDS = 0.08
 PACKAGE_LIST_PATH = "/open/v1/order/package/fetch/search_package_list"
 ONLINE_PRODUCT_PATH = "/open/v1/order/logistics_agent/manage/get_enable_online_product_list"
 
-OUTPUT_XLSX = None
+OUTPUT_XLSX = f"妙手包裹物流信息v6.3-下单时间-{ORDER_START_FROM[:10].replace('-', '.')}-{ORDER_START_TO[:10].replace('-', '.')}.xlsx"
 
 FIELDNAMES = [
     "店铺",
@@ -808,22 +839,19 @@ def export_xlsx(rows, filename=OUTPUT_XLSX):
     print("已生成 Excel：", filename)
 
 
-
 # =========================
-# Django 同步入口
+# Django 同步入口（最小新增）
 # =========================
 
 def fetch_orders():
     """
-    给 Django management command 使用：
-    保持原 v6.3 逻辑，只是不导出 Excel，直接返回 build_rows 生成的 rows。
-    返回字段保持原中文列名：
-    店铺 / 订单编号 / 订单创建时间 / 已创建小时数 / 妙手包裹号 / 物流单号 / 履约类型
+    给 Django sync_orders 调用。
+    保持原 v6.3 API / 签名 / 分页 / 字段提取逻辑不变，
+    只是不导出 Excel，直接返回 build_rows() 的列表。
     """
     print("开始抓取妙手包裹物流信息 v6.3 - Django sync 模式")
     print("密钥文件：", KEY_FILE)
     print("接口域名：", DOMAIN)
-
     api_create_from, api_create_to = get_api_create_range()
     print("后台下单时间 = 妙手创建时间：", ORDER_START_FROM, "到", ORDER_START_TO)
     print("当前北京时间：", get_now_text())
@@ -838,13 +866,12 @@ def fetch_orders():
     print("同步返回行数：", len(rows))
     return rows
 
+
 # =========================
 # 主程序
 # =========================
 
 def main():
-    global OUTPUT_XLSX
-    OUTPUT_XLSX = f"妙手包裹物流信息v6.3-下单时间-{ORDER_START_FROM[:10].replace('-', '.')}-{ORDER_START_TO[:10].replace('-', '.')}.xlsx"
     print("开始导出妙手包裹物流信息 v6.3 - 只走妙手")
     print("密钥文件：", KEY_FILE)
     print("接口域名：", DOMAIN)

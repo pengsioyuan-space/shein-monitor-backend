@@ -1,30 +1,20 @@
 from django.core.management.base import BaseCommand
 from orders.models import Order
-
-import os
-import sys
-
-# sync_orders.py 在 /app/orders/management/commands/ 下；项目根目录是 /app
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
-
-from miaoshou_v63 import fetch_orders
+import importlib
 
 
-REGION_RULES = {
-    "EU": [
-        "EU", "EUR", "EURO", "EUROPE", "欧盟", "欧洲",
-        "DE", "FR", "ES", "IT", "NL", "PL", "SE", "BE", "AT", "IE", "PT",
-        "GERMANY", "FRANCE", "SPAIN", "ITALY", "NETHERLANDS", "POLAND",
-    ],
-    "US": [
-        "US", "USA", "UNITED STATES", "AMERICA", "美国", "美区", "北美",
-    ],
-    "CA": [
-        "CA", "CANADA", "加拿大", "加区",
-    ],
-}
+EU_KEYWORDS = [
+    "EU", "欧盟", "欧洲", "德国", "法国", "意大利", "西班牙", "荷兰", "波兰",
+    "DE", "FR", "IT", "ES", "NL", "PL"
+]
+
+US_KEYWORDS = [
+    "US", "USA", "美国", "美区"
+]
+
+CA_KEYWORDS = [
+    "CA", "CANADA", "加拿大"
+]
 
 
 def safe_str(value):
@@ -42,52 +32,69 @@ def to_float(value, default=0):
         return default
 
 
-def infer_region(*values):
-    """
-    根据店铺名/订单号等文本自动识别 EU / US / CA。
-    没命中返回 OTHER，避免前端统计为空。
-    """
-    text = " ".join(safe_str(v) for v in values if safe_str(v)).upper()
-    if not text:
-        return "OTHER"
+def has_model_field(name):
+    return any(field.name == name for field in Order._meta.fields)
 
-    for region, keywords in REGION_RULES.items():
-        for keyword in keywords:
-            kw = keyword.upper()
-            if kw and kw in text:
-                return region
+
+def infer_region(shop_name="", order_no="", raw_region=""):
+    text = f"{shop_name} {order_no} {raw_region}".upper()
+
+    if raw_region:
+        r = raw_region.upper()
+        if r in ["EU", "US", "CA"]:
+            return r
+
+    for key in US_KEYWORDS:
+        if key.upper() in text:
+            return "US"
+
+    for key in CA_KEYWORDS:
+        if key.upper() in text:
+            return "CA"
+
+    for key in EU_KEYWORDS:
+        if key.upper() in text:
+            return "EU"
+
     return "OTHER"
 
 
-def model_has_field(name):
-    try:
-        Order._meta.get_field(name)
-        return True
-    except Exception:
-        return False
+def get_rows_from_miaoshou():
+    """
+    不要求 miaoshou_v63.py 必须有 fetch_orders。
+    如果有 fetch_orders，就用 fetch_orders。
+    如果没有，就直接复用原来的 read_key_file / fetch_all_packages / build_rows。
+    这样不破坏你原 v6.3 逻辑。
+    """
+    miaoshou = importlib.import_module("miaoshou_v63")
+
+    if hasattr(miaoshou, "fetch_orders"):
+        rows = miaoshou.fetch_orders()
+        return rows or []
+
+    app_key, app_secret = miaoshou.read_key_file(miaoshou.KEY_FILE)
+    packages = miaoshou.fetch_all_packages(app_key, app_secret)
+    rows = miaoshou.build_rows(app_key, app_secret, packages)
+    return rows or []
 
 
 class Command(BaseCommand):
-    help = "同步妙手订单（v6.3）：自动地区识别 + update_or_create 去重"
+    help = "同步妙手近2天订单到数据库"
 
     def handle(self, *args, **kwargs):
         print("🚀 开始同步订单...")
 
         try:
-            rows = fetch_orders()
+            rows = get_rows_from_miaoshou()
         except Exception as e:
-            print("❌ fetch_orders 执行失败：", e)
+            print("❌ 妙手同步失败：", e)
             return
 
-        if rows is None:
-            print("❌ 返回 None")
+        if not rows:
+            print("⚠️ 妙手没有返回订单")
             return
 
-        if not isinstance(rows, list):
-            print("❌ 数据类型错误：", type(rows))
-            return
-
-        print(f"📦 拉取到订单数：{len(rows)}")
+        print(f"📦 妙手返回订单数：{len(rows)}")
 
         created_count = 0
         updated_count = 0
@@ -98,39 +105,54 @@ class Command(BaseCommand):
                 skipped_count += 1
                 continue
 
-            order_no = safe_str(
-                item.get("订单编号")
-                or item.get("order_no")
-                or item.get("orderSn")
-                or item.get("platformOrderSn")
+            order_no = (
+                safe_str(item.get("订单编号"))
+                or safe_str(item.get("order_no"))
+                or safe_str(item.get("orderSn"))
+                or safe_str(item.get("platformOrderSn"))
             )
 
             if not order_no:
                 skipped_count += 1
                 continue
 
-            shop_name = safe_str(item.get("店铺") or item.get("shop_name"))
+            shop_name = safe_str(item.get("店铺")) or safe_str(item.get("shop_name"))
+            logistics_no = safe_str(item.get("物流单号")) or safe_str(item.get("logistics_no"))
             created_hours = to_float(item.get("已创建小时数") or item.get("created_hours"), 0)
-            logistics_no = safe_str(item.get("物流单号") or item.get("logistics_no"))
-            created_time = safe_str(item.get("订单创建时间") or item.get("created_time"))
-            package_no = safe_str(item.get("妙手包裹号") or item.get("package_no"))
-            fulfillment_type = safe_str(item.get("履约类型") or item.get("fulfillment_type"))
-            region = safe_str(item.get("region")) or infer_region(shop_name, order_no)
+            created_time = safe_str(item.get("订单创建时间")) or safe_str(item.get("created_time"))
+            package_no = safe_str(item.get("妙手包裹号")) or safe_str(item.get("package_no"))
+            fulfillment_type = safe_str(item.get("履约类型")) or safe_str(item.get("fulfillment_type"))
+
+            region = infer_region(
+                shop_name=shop_name,
+                order_no=order_no,
+                raw_region=safe_str(item.get("region")),
+            )
 
             defaults = {}
-            if model_has_field("shop_name"):
+
+            if has_model_field("shop_name"):
                 defaults["shop_name"] = shop_name
-            if model_has_field("region"):
+
+            if has_model_field("region"):
                 defaults["region"] = region
-            if model_has_field("created_hours"):
+
+            if has_model_field("created_hours"):
                 defaults["created_hours"] = created_hours
-            if model_has_field("logistics_no"):
+
+            if has_model_field("logistics_no"):
                 defaults["logistics_no"] = logistics_no
-            if model_has_field("created_time"):
+
+            if has_model_field("created_time"):
                 defaults["created_time"] = created_time
-            if model_has_field("package_no"):
+
+            if has_model_field("order_created_time"):
+                defaults["order_created_time"] = created_time
+
+            if has_model_field("package_no"):
                 defaults["package_no"] = package_no
-            if model_has_field("fulfillment_type"):
+
+            if has_model_field("fulfillment_type"):
                 defaults["fulfillment_type"] = fulfillment_type
 
             obj, created = Order.objects.update_or_create(
